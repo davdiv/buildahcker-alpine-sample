@@ -27,10 +27,10 @@ cd buildahcker-alpine-sample
 npm install
 ```
 
-- Build the Alpine image:
+- Build the Alpine image for qemu:
 
 ```bash
-npm run build
+npm run build qemu
 ```
 
 It will be generated in the `output` folder.

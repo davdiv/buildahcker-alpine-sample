@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=https://ifstate.net/schema/ifstate.conf.schema.json
+
+interfaces:
+ - name: eth0
+   addresses:
+    - "10.0.2.15/24"
+   sysctl:
+    ipv6:
+     disable_ipv6: 1
+   link:
+    state: up
+    kind: physical
+    businfo: '0000:00:02.0'
+routing:
+ routes:
+  - to: "0.0.0.0/0"
+    via: 10.0.2.2
+    dev: eth0

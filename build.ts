@@ -1,9 +1,9 @@
 import {
+  DiskFile,
   ImageBuilder,
   MemDirectory,
   MemFile,
   addFiles,
-  rmFiles,
   run,
 } from "buildahcker";
 import { apkAdd, apkRemoveApk, defaultCacheOptions } from "buildahcker/alpine";
@@ -14,13 +14,20 @@ import {
   parted,
   writePartitions,
 } from "buildahcker/alpine/partitions";
-import { stat } from "fs/promises";
+import { readdir, stat } from "fs/promises";
 import { join } from "path";
 
-async function createImage() {
+const validConfig = ["qemu"];
+
+async function createImage(configName: string) {
+  if (!validConfig.includes(configName)) {
+    throw new Error(
+      `Invalid config name, should be one of ${validConfig.join(", ")}`
+    );
+  }
   const cacheOptions = await defaultCacheOptions();
   const logger = process.stderr;
-  const outputFolder = join(import.meta.dirname, "output");
+  const outputFolder = join(import.meta.dirname, "output", configName);
 
   const builder = await ImageBuilder.from("alpine:latest", {
     logger,
@@ -59,38 +66,36 @@ async function createImage() {
     run(["passwd", "-d", "root"]),
     addFiles({
       "etc/mkinitfs/mkinitfs.conf": new MemFile({
-        content: `features="base keymap kms virtio squashfs"\ndisable_trigger=1\n`,
-      }),
-      "run-mkinitfs": new MemFile({
-        content: `#!/bin/sh\nmkinitfs $(ls /lib/modules)`,
-        mode: 0o744,
+        content: `features="base keymap kms scsi virtio squashfs"\ndisable_trigger=1\n`,
       }),
     }),
-    run(["/run-mkinitfs"]),
-    rmFiles(["/run-mkinitfs"]),
+    run(["mkinitfs"], {
+      extraHashData: ["AUTOKERNELVERSION"],
+      beforeRun: async (container, command) => {
+        await container.mount();
+        const kernelVersions = await readdir(
+          join(container.mountPath, "lib", "modules")
+        );
+        if (kernelVersions.length != 1) {
+          throw new Error(
+            `Expected only one kernel version, found: ${kernelVersions.join(
+              ", "
+            )}`
+          );
+        }
+        command.push(kernelVersions[0]);
+      },
+    }),
     addFiles({
-      "etc/resolv.conf": new MemFile({ content: "nameserver 10.0.2.3" }),
+      "etc/resolv.conf": new DiskFile(
+        join(import.meta.dirname, "config", configName, "resolv.conf"),
+        {}
+      ),
       "etc/ifstate": new MemDirectory({ content: {} }),
-      "etc/ifstate/config.yml": new MemFile({
-        content: `
-interfaces:
- - name: eth0
-   addresses:
-    - "10.0.2.15/24"
-   sysctl:
-    ipv6:
-     disable_ipv6: 1
-   link:
-    state: up
-    kind: physical
-    businfo: '0000:00:02.0'
-routing:
- routes:
-  - to: "0.0.0.0/0"
-    via: 10.0.2.2
-    dev: eth0
-`,
-      }),
+      "etc/ifstate/config.yml": new DiskFile(
+        join(import.meta.dirname, "config", configName, "ifstate.yml"),
+        {}
+      ),
     }),
 
     // Remove apk itself and mkinitfs
@@ -140,7 +145,7 @@ routing:
     prefix: "(hd0,2)/usr/lib/grub",
     config: `
 insmod linux
-linux (hd0,2)/boot/vmlinuz-lts root=/dev/vda2
+linux (hd0,2)/boot/vmlinuz-lts root=/dev/sda2
 initrd (hd0,2)/boot/initramfs-lts
 boot
 `,
@@ -149,4 +154,4 @@ boot
   });
 }
 
-createImage();
+createImage(process.argv[2]);
