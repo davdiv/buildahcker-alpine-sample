@@ -4,9 +4,11 @@ import {
   MemDirectory,
   MemFile,
   addFiles,
+  defaultContainerCache,
   run,
+  temporaryContainer,
 } from "buildahcker";
-import { apkAdd, apkRemoveApk, defaultCacheOptions } from "buildahcker/alpine";
+import { apkAdd, apkRemoveApk, defaultApkCache } from "buildahcker/alpine";
 import { grubBiosInstall } from "buildahcker/alpine/grub";
 import { mksquashfs } from "buildahcker/alpine/mksquashfs";
 import {
@@ -25,21 +27,23 @@ async function createImage(configName: string) {
       `Invalid config name, should be one of ${validConfig.join(", ")}`
     );
   }
-  const cacheOptions = await defaultCacheOptions();
-  const logger = process.stderr;
+  const commonOptions = {
+    containerCache: defaultContainerCache(),
+    apkCache: defaultApkCache(),
+    logger: process.stderr,
+  };
   const outputFolder = join(import.meta.dirname, "output", configName);
 
   const builder = await ImageBuilder.from("alpine:latest", {
-    logger,
     commitOptions: {
       timestamp: 0,
     },
-    ...cacheOptions,
+    ...commonOptions,
   });
 
   await builder.executeStep([
     addFiles({
-      "etc/mkinitfs": new MemDirectory({ content: {} }),
+      "etc/mkinitfs": new MemDirectory(),
       "etc/mkinitfs/mkinitfs.conf": new MemFile({
         content: `disable_trigger=1\n`,
       }),
@@ -56,7 +60,7 @@ async function createImage(configName: string) {
         "openrc",
       ],
       {
-        ...cacheOptions,
+        ...commonOptions,
       }
     ),
     run(["rc-update", "add", "ifstate"]),
@@ -91,7 +95,7 @@ async function createImage(configName: string) {
         join(import.meta.dirname, "config", configName, "resolv.conf"),
         {}
       ),
-      "etc/ifstate": new MemDirectory({ content: {} }),
+      "etc/ifstate": new MemDirectory(),
       "etc/ifstate/config.yml": new DiskFile(
         join(import.meta.dirname, "config", configName, "ifstate.yml"),
         {}
@@ -103,11 +107,12 @@ async function createImage(configName: string) {
   ]);
   console.log("Created image:", builder.imageId);
   const squashfsImage = join(outputFolder, "squashfs.img");
-  await mksquashfs({
-    source: builder.imageId,
-    outputFile: squashfsImage,
-    logger,
-    cacheOptions,
+  await temporaryContainer(builder.imageId, async (container) => {
+    await mksquashfs({
+      inputFolder: await container.mount(),
+      outputFile: squashfsImage,
+      ...commonOptions,
+    });
   });
   const squashfsImageSize = (await stat(squashfsImage)).size;
 
@@ -126,8 +131,7 @@ async function createImage(configName: string) {
         type: PartitionType.LinuxData,
       },
     ],
-    cacheOptions,
-    logger,
+    ...commonOptions,
   });
   await writePartitions({
     outputFile: diskImage,
@@ -149,8 +153,7 @@ linux (hd0,2)/boot/vmlinuz-lts root=/dev/sda2
 initrd (hd0,2)/boot/initramfs-lts
 boot
 `,
-    cacheOptions,
-    logger,
+    ...commonOptions,
   });
 }
 
