@@ -3,19 +3,20 @@ import {
   ImageBuilder,
   MemDirectory,
   MemFile,
+  PartitionType,
   addFiles,
+  apkAdd,
+  apkRemoveApk,
+  defaultApkCache,
   defaultContainerCache,
+  grubBiosSetup,
+  grubMkimage,
+  mksquashfs,
+  parted,
   run,
   temporaryContainer,
-} from "buildahcker";
-import { apkAdd, apkRemoveApk, defaultApkCache } from "buildahcker/alpine";
-import { grubBiosInstall } from "buildahcker/alpine/grub";
-import { mksquashfs } from "buildahcker/alpine/mksquashfs";
-import {
-  PartitionType,
-  parted,
   writePartitions,
-} from "buildahcker/alpine/partitions";
+} from "buildahcker";
 import { readdir, stat } from "fs/promises";
 import { join } from "path";
 
@@ -115,14 +116,31 @@ async function createImage(configName: string) {
     });
   });
   const squashfsImageSize = (await stat(squashfsImage)).size;
-
+  const grubCore = join(outputFolder, "grub-core.img");
+  const grubBoot = join(outputFolder, "grub-boot.img");
+  await grubMkimage({
+    outputCoreFile: grubCore,
+    outputBootFile: grubBoot,
+    grubSource: builder.imageId,
+    target: "i386-pc",
+    modules: ["biosdisk", "part_gpt", "squash4"],
+    prefix: "(hd0,2)/usr/lib/grub",
+    config: `
+insmod linux
+linux (hd0,2)/boot/vmlinuz-lts root=/dev/sda2
+initrd (hd0,2)/boot/initramfs-lts
+boot
+`,
+    ...commonOptions,
+  });
+  const grubCoreImageSize = (await stat(grubCore)).size;
   const diskImage = join(outputFolder, "disk.img");
   const partitions = await parted({
     outputFile: diskImage,
     partitions: [
       {
         name: "grub",
-        size: 100000,
+        size: grubCoreImageSize,
         type: PartitionType.BiosBoot,
       },
       {
@@ -142,17 +160,11 @@ async function createImage(configName: string) {
       },
     ],
   });
-  await grubBiosInstall({
+  await grubBiosSetup({
     imageFile: diskImage,
     partition: partitions[0],
-    modules: ["biosdisk", "part_gpt", "squash4"],
-    prefix: "(hd0,2)/usr/lib/grub",
-    config: `
-insmod linux
-linux (hd0,2)/boot/vmlinuz-lts root=/dev/sda2
-initrd (hd0,2)/boot/initramfs-lts
-boot
-`,
+    bootFile: grubBoot,
+    coreFile: grubCore,
     ...commonOptions,
   });
 }
