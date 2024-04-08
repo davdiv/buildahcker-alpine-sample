@@ -14,6 +14,7 @@ import {
   mksquashfs,
   parted,
   run,
+  sshKeygen,
   temporaryContainer,
   writePartitions,
 } from "buildahcker";
@@ -34,6 +35,7 @@ async function createImage(configName: string) {
     logger: process.stderr,
   };
   const outputFolder = join(import.meta.dirname, "output", configName);
+  const configFolder = join(import.meta.dirname, "config", configName);
 
   const builder = await ImageBuilder.from("alpine:latest", {
     commitOptions: {
@@ -41,7 +43,6 @@ async function createImage(configName: string) {
     },
     ...commonOptions,
   });
-
   await builder.executeStep([
     addFiles({
       "etc/mkinitfs": new MemDirectory(),
@@ -59,12 +60,14 @@ async function createImage(configName: string) {
         "linux-firmware-none",
         "linux-lts",
         "openrc",
+        "openssh",
       ],
       {
         ...commonOptions,
       }
     ),
     run(["rc-update", "add", "ifstate"]),
+    run(["rc-update", "add", "sshd"]),
     run(["setup-keymap", "fr", "fr"]),
     run(["setup-hostname", "alpine"]),
     run(["setup-timezone", "-z", "Europe/Paris"]),
@@ -92,17 +95,32 @@ async function createImage(configName: string) {
       },
     }),
     addFiles({
-      "etc/resolv.conf": new DiskFile(
-        join(import.meta.dirname, "config", configName, "resolv.conf"),
-        {}
-      ),
+      "etc/resolv.conf": new DiskFile(join(configFolder, "resolv.conf"), {}),
       "etc/ifstate": new MemDirectory(),
       "etc/ifstate/config.yml": new DiskFile(
-        join(import.meta.dirname, "config", configName, "ifstate.yml"),
+        join(configFolder, "ifstate.yml"),
         {}
       ),
     }),
-
+    addFiles({
+      "root/.ssh": new MemDirectory(),
+      "root/.ssh/authorized_keys": (
+        await sshKeygen({
+          prefix: "id_",
+          suffix: "",
+          outputFolder: join(configFolder, "ssh"),
+          ...commonOptions,
+        })
+      )["id_ed25519.pub"],
+      "etc/ssh": new MemDirectory({
+        content: {
+          ...(await sshKeygen({
+            outputFolder: join(configFolder, "ssh"),
+            ...commonOptions,
+          })),
+        },
+      }),
+    }),
     // Remove apk itself and mkinitfs
     apkRemoveApk(["mkinitfs"], process.stderr),
   ]);

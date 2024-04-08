@@ -45,6 +45,12 @@ npm start
 
 You should see QEMU booting the image. You can login as `root`. There is no password.
 
+It is also possible to connect through SSH:
+
+```
+ssh -p 55022 -i config/qemu/ssh/id_ed25519 root@localhost
+```
+
 ## Explanations
 
 The [build.ts](./build.ts) file uses the [buildahcker](https://github.com/davdiv/buildahcker) library to create an [Alpine Linux](https://www.alpinelinux.org/) image with pre-installed packages, and customized network settings.
