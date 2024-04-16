@@ -50,7 +50,7 @@ async function createImage(configName: string) {
     apkAdd(
       [
         "alpine-conf",
-        "grub-bios",
+        "busybox-mdev-openrc",
         "grub",
         "ifstate",
         "linux-firmware-none",
@@ -62,15 +62,17 @@ async function createImage(configName: string) {
         ...commonOptions,
       }
     ),
+    run(["rc-update", "add", "mdev"]),
+    run(["rc-update", "add", "hwdrivers"]),
+    run(["rc-update", "add", "hostname"]),
     run(["rc-update", "add", "ifstate"]),
     run(["rc-update", "add", "sshd"]),
     run(["setup-keymap", "fr", "fr"]),
-    run(["setup-hostname", "alpine"]),
     run(["setup-timezone", "-z", "Europe/Paris"]),
     run(["passwd", "-d", "root"]),
     addFiles({
       "etc/mkinitfs/mkinitfs.conf": new MemFile({
-        content: `features="base keymap kms scsi virtio squashfs"\ndisable_trigger=1\n`,
+        content: `features="base keymap kms usb ata scsi virtio squashfs"\ndisable_trigger=1\n`,
       }),
     }),
     run(["mkinitfs"], {
@@ -92,6 +94,7 @@ async function createImage(configName: string) {
     }),
     addFiles({
       "etc/resolv.conf": new DiskFile(join(configFolder, "resolv.conf"), {}),
+      "etc/hostname": new DiskFile(join(configFolder, "hostname"), {}),
       "etc/ifstate": new MemDirectory(),
       "etc/ifstate/config.yml": new DiskFile(
         join(configFolder, "ifstate.yml"),
