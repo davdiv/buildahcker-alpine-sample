@@ -3,22 +3,18 @@ import {
   ImageBuilder,
   MemDirectory,
   MemFile,
-  PartitionType,
+  abpartitionsDisk,
+  abpartitionsRootPartition,
   addFiles,
   apkAdd,
   apkRemoveApk,
+  copyFileInImage,
   defaultApkCache,
   defaultContainerCache,
-  grubBiosSetup,
-  grubMkimage,
-  mksquashfs,
-  parted,
   run,
   sshKeygen,
-  temporaryContainer,
-  writePartitions,
 } from "buildahcker";
-import { readdir, stat } from "fs/promises";
+import { readdir } from "fs/promises";
 import { join } from "path";
 
 const validConfig = ["qemu"];
@@ -125,66 +121,19 @@ async function createImage(configName: string) {
     apkRemoveApk(["mkinitfs"], process.stderr),
   ]);
   console.log("Created image:", builder.imageId);
-  const squashfsImage = join(outputFolder, "squashfs.img");
-  await temporaryContainer(builder.imageId, async (container) => {
-    await mksquashfs({
-      inputFolder: await container.mount(),
-      outputFile: squashfsImage,
-      ...commonOptions,
-    });
-  });
-  const squashfsImageSize = (await stat(squashfsImage)).size;
-  const grubCore = join(outputFolder, "grub-core.img");
-  const grubBoot = join(outputFolder, "grub-boot.img");
-  await grubMkimage({
-    outputCoreFile: grubCore,
-    outputBootFile: grubBoot,
-    grubSource: builder.imageId,
-    target: "i386-pc",
-    modules: ["biosdisk", "part_gpt", "squash4"],
-    prefix: "(hd0,2)/usr/lib/grub",
-    config: `
-insmod linux
-linux (hd0,2)/boot/vmlinuz-lts root=/dev/sda2
-initrd (hd0,2)/boot/initramfs-lts
-boot
-`,
+  const rootPartition = await abpartitionsRootPartition({
+    sourceRootImage: builder.imageId,
     ...commonOptions,
   });
-  const grubCoreImageSize = (await stat(grubCore)).size;
+  const disk = await abpartitionsDisk({
+    rootPartition,
+    rootPartitionSize: 300 * 1024 * 1024,
+    ...commonOptions,
+  });
+  const rootImage = join(outputFolder, "root.img");
+  await copyFileInImage(rootPartition, rootImage);
   const diskImage = join(outputFolder, "disk.img");
-  const partitions = await parted({
-    outputFile: diskImage,
-    partitions: [
-      {
-        name: "grub",
-        size: grubCoreImageSize,
-        type: PartitionType.BiosBoot,
-      },
-      {
-        name: "linux",
-        size: squashfsImageSize,
-        type: PartitionType.LinuxData,
-      },
-    ],
-    ...commonOptions,
-  });
-  await writePartitions({
-    outputFile: diskImage,
-    partitions: [
-      {
-        inputFile: squashfsImage,
-        output: partitions[1],
-      },
-    ],
-  });
-  await grubBiosSetup({
-    imageFile: diskImage,
-    partition: partitions[0],
-    bootFile: grubBoot,
-    coreFile: grubCore,
-    ...commonOptions,
-  });
+  await copyFileInImage(disk, diskImage);
 }
 
 createImage(process.argv[2]);
