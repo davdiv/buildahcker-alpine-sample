@@ -71,10 +71,28 @@ async function createImage(configName: string) {
     run(["setup-timezone", "-z", "Europe/Paris"]),
     run(["passwd", "-d", "root"]),
     addFiles({
+      "etc/init.d/buildahcker-ab-reboot": new MemFile({
+        content: `#!/sbin/openrc-run
+name="buildahcker-ab-reboot"
+description="Reboots if the current A/B partition is not marked as stable soon enough after restarting."
+start() {
+  if ! buildahckerABTool is-stable ; then
+    (
+      sleep 120
+      if ! buildahckerABTool is-stable ; then
+        reboot
+      fi
+    ) &
+  fi
+}
+`,
+        mode: 0o555,
+      }),
       "etc/mkinitfs/mkinitfs.conf": new MemFile({
         content: `features="base keymap kms usb ata scsi virtio squashfs"\ndisable_trigger=1\n`,
       }),
     }),
+    run(["rc-update", "add", "buildahcker-ab-reboot"]),
     run(["mkinitfs"], {
       extraHashData: ["AUTOKERNELVERSION"],
       beforeRun: async (container, command) => {
