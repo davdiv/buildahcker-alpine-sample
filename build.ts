@@ -51,6 +51,7 @@ async function createImage(configName: string) {
       [
         "alpine-conf",
         "busybox-mdev-openrc",
+        "busybox-openrc",
         "grub",
         "ifstate",
         "linux-firmware-none",
@@ -62,6 +63,8 @@ async function createImage(configName: string) {
         ...commonOptions,
       }
     ),
+    run(["rc-update", "add", "modules"]),
+    run(["rc-update", "add", "syslog"]),
     run(["rc-update", "add", "mdev"]),
     run(["rc-update", "add", "hwdrivers"]),
     run(["rc-update", "add", "hostname"]),
@@ -118,6 +121,9 @@ start() {
         join(configFolder, "ifstate.yml"),
         {}
       ),
+      "etc/conf.d/syslog": new MemFile({
+        content: `SYSLOGD_OPTS="-t -K"\n`,
+      }),
     }),
     addFiles({
       "root/.ssh": new MemDirectory(),
